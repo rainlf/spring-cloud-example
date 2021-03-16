@@ -1,5 +1,6 @@
-package com.rainlf.spring.cloud.example.openfeignconsumer;
+package com.rainlf.spring.cloud.example.openfeignconsumer.controller;
 
+import com.rainlf.spring.cloud.example.openfeignconsumer.service.IOpenFeignProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;

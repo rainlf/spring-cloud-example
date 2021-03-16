@@ -1,4 +1,4 @@
-package com.rainlf.spring.cloud.example.openfeignconsumer;
+package com.rainlf.spring.cloud.example.openfeignconsumer.service;
 
 import org.springframework.stereotype.Component;
 

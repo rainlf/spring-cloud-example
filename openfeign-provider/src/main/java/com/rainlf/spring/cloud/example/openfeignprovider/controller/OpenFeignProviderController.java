@@ -1,4 +1,4 @@
-package com.rainlf.spring.cloud.example.openfeignprovider;
+package com.rainlf.spring.cloud.example.openfeignprovider.controller;
 
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
