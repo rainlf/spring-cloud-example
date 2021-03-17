@@ -228,7 +228,7 @@ openfeign.provider.name=openfeign-provider
 
 在`SpringCloud`家族中，默认的负载均衡实现为`Rbiion`，但在不幸的是该项目已停止维护，`Spring`官方推荐`Spring Cloud Loadbalancer`来替换它。
 
-在使用`OpenFeign`时，可通过在配置中取消默认实现来使用`Spring Cloud Loadbalancer`
+在项目中，可通过在配置关闭`Ribbon`来启用`Spring Cloud Loadbalancer`
 
 添加依赖
 
@@ -250,12 +250,202 @@ spring.cloud.loadbalancer.ribbon.enabled=false
 
 服务容错保护，目前在`OpenFeign`中默认集成了`Hystrix`的实现，但同样的该项目也停止了维护，`Spring`官方推荐使用`Resilience4j`来替换它。
 
-`Resilience4j`是一个轻量、易用、可组装的高可用框架，支持***熔断***、***高频控制***、***隔离***、***限流***、***限时***、***重试***等多种高可用机制。 
+`Resilience4j`是一个轻量、易用、可组装的高可用框架，支持***熔断***、***高频控制***、***隔离***、***限流***、***限时***、***重试***等多种高可用机制。 目前实现上述服务容错的方案大致可分为以下五种：
 
-与`Hystrix`相比，它有以下一些主要的区别： 
+1.  超时：给每个请求配置一个超时时间，如果超过配置时间，则释放线程资源
+2.  限流：为服务设置最大并发数，放置线程生成过多而导致资源耗尽
+3.  仓壁模式：每个服务使用独立的线程池，相互之间隔离，互不影响
+4.  断路器模式：当一个服务触发断路条件时，开启断路器
+5.  重试：进行多次尝试来容错
 
--  `Hystrix`调用必须被封装到`HystrixCommand`里，`Resilience4j`以装饰器的方式提供对函数式接口、`lambda表达式`等的嵌套装饰，因此可以用简洁的方式组合多种高可用机制
--  `Hystrix`的频次统计采用滑动窗口的方式，`Resilience4j`采用环状缓冲区的方式
--  在熔断器在半开状态时，`Hystrix`仅使用一次执行判定是否进行状态转换，`Resilience4j`采用可配置的执行次数与阈值，来决定是否进行状态转换，这种方式提高了熔断机制的稳定性
--  关于隔离机制，`Hystrix`提供基于线程池和信号量的隔离，`Resilience4j`只提供基于信号量的隔离
+在断路器模式中，设计断路器状态的变化，断路器会在关闭、开启、半开三个模式之间转换，具体如下图：
 
+![1615947858284](README/1615947858284.png)
+
+下文详细介绍每种模式的具体配置以及使用方式。
+
+#### 依赖
+
+```xml
+<dependency>
+    <groupId>io.github.resilience4j</groupId>
+    <artifactId>resilience4j-spring-cloud2</artifactId>
+    <version>1.7.0</version>
+</dependency>
+```
+
+#### 限流模式
+
+使用`@RateLimiter`注解，` Resilicence44j `的限流实现有
+
+-    `io.github.resilience4j.ratelimiter.internal.AtomicRateLimiter` 默认，基于令牌桶算法 
+-   `io.github.resilience4j.ratelimiter.internal.SemaphoreBasedRateLimiter` 基于`Semaphore`类 
+
+```java
+@RateLimiter(name = "testRateLimiter", fallbackMethod = "fallbackMethod")
+@GetMapping("testRateLimiter")
+public String testRateLimiter(){
+    return "ok";
+}
+```
+
+相关配置
+
+```properties
+# 在刷新周期内，请求的最大频次
+resilience4j.ratelimiter.instances.testRateLimiter.limit-for-period=1
+# 刷新周期时长
+resilience4j.ratelimiter.instances.testRateLimiter.limit-refresh-period=1s
+# 线程等待许可的时间，0表示线程不等待则直接抛异常
+resilience4j.ratelimiter.instances.testRateLimiter.timeout-duration=0
+```
+
+#### 仓壁模式
+
+` Resilicence44j `的仓壁模式的实现有
+
+-   ` Semaphore`方式：默认，每个请求去获取信号量，如果没有获取到，则拒绝请求
+-   `ThreadPool`方式：每个请求去获取线程，如果没有获取到，则进入等待队列，如果队列已满，则执行拒绝策略
+
+从性能角度来看，基于`Semaphore`要优于基于`ThreadPool`要好，在基于`ThreadPool`时，可能会导致过多的小型的隔离线程池，会导致整个微服务的线程数过多，而线程数过多会导致线程上下文切换过多，影响性能。
+
+```java
+@Bulkhead(name = "testBulkhead", fallbackMethod = "fallbackMethod")
+@GetMapping("testBulkhead")
+public String testBulkhead(){
+    return "ok";
+}
+
+@Bulkhead(name = "testThreadPoolBulkhead", fallbackMethod = "fallbackMethod", type = Bulkhead.Type.THREADPOOL)
+@GetMapping("testThreadPoolBulkhead")
+public String testThreadPoolBulkhead(){
+    return "ok";
+}
+```
+
+相关配置
+```properties
+# 最大并发请求数
+resilience4j.bulkhead.instances.testBulkhead.max-concurrent-calls=1
+# 仓壁饱和时的最大等待时间，默认0
+resilience4j.bulkhead.instances.testBulkhead.max-wait-duration=10ms
+# 事件缓冲区大小
+resilience4j.bulkhead.instances.testBulkhead.event-consumer-buffer-size=1
+
+# 最大线程池大小
+resilience4j.thread-pool-bulkhead.instances.testThreadPoolBulkhead.max-thread-pool-size=1
+# 核心线程数
+resilience4j.thread-pool-bulkhead.instances.testThreadPoolBulkhead.core-thread-pool-size=1
+# 队列容量，默认100
+resilience4j.thread-pool-bulkhead.instances.testThreadPoolBulkhead.queue-capacity=10
+# 当线程数大于内核数时，多余空闲线程存活时间，默认20ms
+resilience4j.thread-pool-bulkhead.instances.testThreadPoolBulkhead.keep-alive-duration=10ms
+# 事件缓冲区大小
+resilience4j.thread-pool-bulkhead.instances.testThreadPoolBulkhead.event-consumer-buffer-size=100
+```
+
+#### 断路器模式
+
+` Resilicence44j `的断路器模式使用` io.github.resilience4j.circuitbreaker.internal.CircuitBreakerStateMachine `基于有限状态机来实现。
+
+```java
+@CircuitBreaker(name = "testCircuitBreaker", fallbackMethod = "fallbackMethod")
+@GetMapping("testCircuitBreaker")
+public String testCircuitBreaker(){
+    if (i++ % 2 == 0) {
+        throw new RuntimeException("random exception");
+    }
+    return "ok";
+}
+```
+
+相关配置
+
+```properties
+# 滑动窗口大小，默认100
+resilience4j.circuitbreaker.instances.testCircuitBreaker.sliding-window-size=100
+# 滑动窗口类型，默认COUNT_BASED
+resilience4j.circuitbreaker.instances.testCircuitBreaker.sliding-window-type=COUNT_BASED
+# 断路器半开时，允许的请求尝试的个数，默认10
+resilience4j.circuitbreaker.instances.testCircuitBreaker.permitted-number-of-calls-in-half-open-state=10
+# 启动断路器的最小请求数
+resilience4j.circuitbreaker.instances.testCircuitBreaker.minimum-number-of-calls=10
+# 断路器从打开切换到半开的时间
+resilience4j.circuitbreaker.instances.testCircuitBreaker.wait-duration-in-open-state=60s
+# 错误率阈值
+resilience4j.circuitbreaker.instances.testCircuitBreaker.failure-rate-threshold=50
+# 慢请求率阈值
+resilience4j.circuitbreaker.instances.testCircuitBreaker.slow-call-rate-threshold=100
+# 慢请求时间阈值
+resilience4j.circuitbreaker.instances.testCircuitBreaker.slow-call-duration-threshold=60s
+# 记录异常的Predicate，java.util.function.Predicate的实现类
+resilience4j.circuitbreaker.instances.testCircuitBreaker.record-failure-predicate=
+# 纳入调用失败率统计的异常列表
+resilience4j.circuitbreaker.instances.testCircuitBreaker.record-exceptions=java.lang.Exception
+# 不会纳入调用失败率统计的异常列表
+resilience4j.circuitbreaker.instances.testCircuitBreaker.ignore-exceptions=
+# 是否将断路器监控信息注册到/actuator/health
+resilience4j.circuitbreaker.instances.testCircuitBreaker.register-health-indicator=true
+# 事件缓冲区大小
+resilience4j.circuitbreaker.instances.testCircuitBreaker.event-consumer-buffer-size=10
+```
+
+#### 重试模式
+
+使用`@Retry`注解
+
+```java
+@Retry(name = "testRetry", fallbackMethod = "fallbackMethod")
+@GetMapping("testRetry")
+public String testRetry(){
+    if (true) {
+        throw new RuntimeException("exception");
+    }
+    return "ok " + i++;
+}
+```
+
+相关配置
+
+```properties
+# 最大重试次数，默认3
+resilience4j.retry.instances.testRetry.max-attempts=3
+# 多次重试的间隔
+resilience4j.retry.instances.testRetry.wait-duration=500ms
+# 是否开启指数退避，默认false
+resilience4j.retry.instances.testRetry.enable-exponential-backoff=true
+# 时间间隔乘数，配置enable-exponential-backoff使用
+resilience4j.retry.instances.testRetry.exponential-backoff-multiplier=2
+# 是否开启随机重试时间
+resilience4j.retry.instances.testRetry.enable-randomized-wait=false
+# 重试间隔随机因子，配合enable-randomized-wait使用
+resilience4j.retry.instances.testRetry.randomized-wait-factor=2
+# 记录异常的Predicate，java.util.function.Predicate的实现类
+resilience4j.retry.instances.testRetry.retry-exception-predicate=
+# 需要重试的异常
+resilience4j.retry.instances.testRetry.retry-exceptions=java.lang.Exception
+# 不需要重试的异常
+resilience4j.retry.instances.testRetry.ignore-exceptions=
+# 事件缓冲区大小
+resilience4j.retry.instances.testCircuitBreaker.event-consumer-buffer-size=10
+```
+
+#### Fallback方法
+
+`fallback`方法名称保持和注解中的`fallbackMethod`属性值一致以及和原方法返回值一致，并且在参数中增加`Throwable throwable`
+
+```java
+public String fallbackMethod(Throwable throwable) {
+    log.error("Fallback Happened", throwable);
+    return "ok fallback";
+}
+```
+
+#### 默认配置中
+
+在使用默认配置时，需要在相应注解中取消`name`属性，并在配置文件中执行`default`属性即可，例如
+```properties
+resilience4j.ratelimiter.configs.default.limit-for-period=1
+```
+
+以上各个模式的测试场景可参考项目中`Resilience4jTest.java`
