@@ -21,6 +21,8 @@
 - `spring-cloud-starter-netflix-eureka-server`
 - `spring-cloud-starter-netflix-eureka-client`
 - `spring-cloud-starter-openfeign`
+- `spring-cloud-starter-loadbalancer`
+- `resilience4j-spring-cloud2`
 
 ## 模块
 
@@ -449,3 +451,109 @@ resilience4j.ratelimiter.configs.default.limit-for-period=1
 ```
 
 以上各个模式的测试场景可参考项目中`Resilience4jTest.java`
+
+### 链路追踪（Sleuth-Zipkin）
+
+在微服务场景中，一个完成的`HTTP`请求往往会经过多个微服务模块，如果想了解到一条链路中所有的日志和事件，就需要链路追踪的功能。`Spring`使用`Cloud Sleuth`来提供分布式服务追踪的能力，并配合`Zipkin`系统实现数据的采集和展示。
+
+假设场景里有两个微服务项目`zipkin-client-a`和`zipkin-client-b`，一条请求会经过`zipkin-client-a`再经过`zipkin-client-b`后再结束。下面介绍`Zipkin Server`搭建过程和具体的项目实现。
+
+搭建`Zipkin Server`
+
+-   访问https://github.com/openzipkin/zipkin 下载最新的发布文件
+-   运行`java -jar zipkin-server.jar`
+-   访问http://localhost:9411/zipkin 查看`UI`
+
+依赖
+
+```xml
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-starter-sleuth</artifactId>
+</dependency>
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-sleuth-zipkin</artifactId>
+</dependency>
+```
+
+`zipkin-client-a`服务
+
+```java
+@Slf4j
+@RestController
+public class AController {
+    @Autowired
+    private RestTemplate restTemplate;
+
+    @GetMapping
+    public String test() {
+        log.info("this is a");
+        return restTemplate.getForObject("http://zipkin-client-b", String.class);
+    }
+}
+```
+
+`zipkin-client-a`配置
+
+```properties
+spring.application.name=zipkin-client-a
+server.port=8040
+
+eureka.client.serviceUrl.defaultZone=http://localhost:8761/eureka
+
+spring.zipkin.base-url=http://localhost:9411
+```
+
+`zipkin-client-b`服务
+
+```java
+@Slf4j
+@RestController
+public class BController {
+
+    @GetMapping
+    public String test() {
+      log.info("this is b");
+      return "ok";
+    }
+}
+```
+
+`zipkin-client-b`配置
+
+```properties
+spring.application.name=zipkin-client-b
+server.port=8041
+
+eureka.client.serviceUrl.defaultZone=http://localhost:8761/eureka
+
+spring.zipkin.base-url=http://localhost:9411
+```
+
+此时访问http://localhost:8040/
+
+可以看到`zipkin-client-a`显示日志
+
+```
+2021-03-17 20:02:55.188  INFO [zipkin-client-a,a580b8222b46228d,a580b8222b46228d,true] 13388 --- [nio-8040-exec-8] c.r.s.c.e.zipkinclienta.AController      : this is a
+```
+
+`zipkin-client-b`显示日志
+
+```
+2021-03-17 20:02:55.190  INFO [zipkin-client-b,a580b8222b46228d,e1460f0f158c26ba,true] 14284 --- [nio-8041-exec-8] c.r.s.c.e.zipkinclientb.BController      : this is b
+```
+
+其中
+
+-   `zipkin-client-b`为服务名
+-   `a580b8222b46228d`为`Trace ID`，在一条完整的请求链路中，该值是固定的
+-   `e1460f0f158c26ba`为`Span ID`，标识一个基本的工作单元
+-   `true` 表示该信息会输出到`Zipkin`服务中来收集和展示
+
+访问http://localhost:9411/zipkin 可以看到相关的数据和链路信息
+
+![1615984143518](README/1615984143518.png)
+
+![1615984163509](README/1615984163509.png)
