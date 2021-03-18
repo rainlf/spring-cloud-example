@@ -14,4 +14,18 @@
         <maven.compiler.target>8</maven.compiler.target>
     </properties>
 
+    <modules>
+        <module>eureka-server</module>
+        <module>eureka-client</module>
+        <module>openfeign-consumer</module>
+        <module>openfeign-provider</module>
+        <module>resilience4j-demo</module>
+        <module>zipkin-client-a</module>
+        <module>zipkin-client-b</module>
+        <module>stream-demo</module>
+        <module>config-server</module>
+        <module>config-client</module>
+        <module>gateway-demo</module>
+    </modules>
+
 </project>
