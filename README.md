@@ -23,6 +23,13 @@
 - `spring-cloud-starter-openfeign`
 - `spring-cloud-starter-loadbalancer`
 - `resilience4j-spring-cloud2`
+- `spring-cloud-starter-sleuth`
+- `spring-cloud-sleuth-zipkin`
+- `spring-cloud-stream`
+- `spring-cloud-stream-binder-rabbit`
+- `spring-cloud-config-server`
+- `spring-cloud-starter-config`
+- `spring-cloud-starter-gateway`
 
 ## 模块
 
@@ -843,3 +850,81 @@ spring.cloud.config.profile=dev
 
 再配置中心仓库中提交了新的修改后，调用`curl -XPOST http://localhost:8061/actuator/refresh`刷新配置，再次访问可看到更新后的配置已被正常获取到。
 
+### API网关（Spring Cloud Gateway）
+
+`Spring Cloud Gateway`为官方推荐替代`zuul`的项目，后者已经停止了维护，该项目旨在为微服务架构提供一种简单有效统一的API路由管理方式。
+
+`Spring Cloud Gateway`中的基础概念有：
+
+-   `Route`： 路由，是网关的基本组成模块。它由一个`ID`，一个`目标URL`，一组`Predicate`和一组`Filter`组成，在`Predicate`为真时，则路由匹配。
+-   `Predicate`：断言，一个`Java8`的`Predicate`，输入类型为`ServerWebExchange`，可以用它来匹配来自`HTTP`请求的任何内容。
+-   `Filter`：过滤器，用来捕获、修改需要的请求和响应。
+
+`Spring Cloud Gateway`的架构图如下
+
+![1616056573988](README/1616056573988.png)
+
+一个请求从`Client`发出后，由`Gateway Handler Mapping`来查找与之匹配的路由，然后将其发送到`Gateway Web Handler`，`Gateway Web Handler`再通过指定`Filter 链`来将请求发送到设计的业务服务中，处理结束后，再按原路径返回。
+
+这里结合上文中的`zipkin-client`服务来说明`Spring Cloud Gateway`的作用。
+
+依赖
+
+```xml
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-starter-gateway</artifactId>
+</dependency>
+```
+
+注册自定义过滤器
+
+```java
+@Slf4j
+public class MyFilter implements GatewayFilter, Ordered {
+    private static final String START_TIME = "start_time";
+
+    @Override
+    public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
+        exchange.getAttributes().put(START_TIME, System.currentTimeMillis());
+        return chain.filter(exchange).then(
+                Mono.fromRunnable(() -> {
+                    Long startTime = exchange.getAttribute(START_TIME);
+                    if (startTime != null) {
+                        log.info("{}: {} ms", exchange.getRequest().getURI().getRawPath(), (System.currentTimeMillis() - startTime));
+                    }
+                })
+        );
+    }
+
+    /*
+     *过滤器存在优先级，order越小，优先级越高
+     */
+    @Override
+    public int getOrder() {
+        return Ordered.LOWEST_PRECEDENCE;
+    }
+}
+```
+
+声明路由
+```java
+@Configuration
+public class RouteConfig {
+    @Bean
+    public RouteLocator routeLocator(RouteLocatorBuilder builder) {
+        return builder.routes()
+                // 匹配路径
+                .route(r -> r.path("/")
+                        // 转发路由
+                        .uri("http://www.baidu.com")
+                        // 注册自定义过滤器
+                        .filters(new MyFilter())
+                        // 给定id
+                        .id("my-route"))
+                .build();
+    }
+}
+```
+
+启动项目后访问http://localhost:8070/ 则可以观察到页面跳转至百度页面，实现路由效果。
