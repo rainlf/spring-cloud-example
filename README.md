@@ -557,3 +557,144 @@ spring.zipkin.base-url=http://localhost:9411
 ![1615984143518](README/1615984143518.png)
 
 ![1615984163509](README/1615984163509.png)
+
+### 消息驱动（Spring Cloud Stream）
+
+`Spring Cloud Stream`是一款用于连接消息系统构建高度可扩展的基于事件驱动的微服务框架。
+
+该框架在`Spring`的常规用法和最佳实践之上，提供了一系列灵活的编程模型，包括对持久化发布/订阅语义、消费者组以及有状态分区等的支持。
+
+`Spring Cloud Stream`架构如下
+
+![1616032798983](README/1616032798983.png)
+
+`Spring Cloud Stream`支持一系列`binder`的实现，如`RabbitMQ`、`Apache Kafka`、`Kafka Streams`等。
+
+`Spring Cloud Stream`的核心概念有：
+
+-   `Destination Binders`: 负责提供和外部消息系统链接整合的模块
+-   `Destination Bindings`: 应用代码（生产者/消费者）与外部消息系统之间的桥梁，是`Binder`加上`Channel`（`inputs`和`outputs`）绑定关系的描述
+-   `Message`: 由生产者和消费者使用的，用于和`Destination Binders`通信的标准数据结构
+
+在上述关系中，`Binder`负责和`MQ`中间件进行通信。应用程序作为生产者时，则会通过`outputs`投递`Message`给`Binder`；作为消费者时，则会通过`inputs`接收`Binder`包装后的`Message`。
+
+#### Pub-Sub
+
+`Spring Cloud Stream`提供的是共享`Topic`的`publish-subscribe`模型，该模型在微服务中更具有普适性，也可以通过只有一个消费者的模式来变相支持`p2p`模型。
+
+#### Consumer Group
+
+在普通的`publish-subscribe`模型中，多个`consumer`订阅同一个`topic`时，这些`consumer`之间是竞争关系，也就是`topic`中的一条消息只会被这些`consumer`中的某一个来消费。对于需要多个`consumer`共同消费同一个消息的场景，`Spring Cloud Stream`提供`consumer group`的概念来支持。
+
+在存在多个`consumer group`时，一个`topic`的每一条消息均会采用多副本的方式分发给所有订阅该`topic`的`consumer group`，但每个`consumer group`内的`consumer`之间，依然是竞争关系。在`Spring Cloud Stream`中可通过`spring.cloud.stream.bindings.<channel-name>.group`属性来设置自己所属的`consumer group`。
+
+在默认情况下，没有为`consumer`指定`consumer group`时，`Spring Cloud Stream`会为其分配一个独立的匿名消费者组。所以如果某个`topic`下的`consumer`均未指定`consumer group`，当消息发布时，所有的`consumer`都会进行消费，因为你它们独属于各自的组。实际使用时，建议指定`consumer group`，已防止对消息的重复消费。
+
+#### Partition
+
+通过`consumer group`，可以保障每个消息只会被组内的某个示例消费一次，但是不能控制消息会被哪一个示例来消费。这种情况下，多条消息到达后，可能会由不同的`consumer`示例来消费。
+
+在一切特定场景中，需要具有某些相同特征的消息会被同一个消费者来消费，因此，`MQ`中间件引入了消息分区的概念，使消息可以根据特征写入到不同的`partition`中，不同的消费者实例指定消费不同`partition`的消息，确保了相同特征消息会被同一个消费者来消费。
+
+下面介绍消息生产者和发送者的具体配置和实现。
+
+依赖
+
+```xml
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-stream</artifactId>
+</dependency>
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-stream-binder-rabbit</artifactId>
+</dependency>
+```
+
+声明`channel`
+
+```java
+public interface MessageTopic {
+    String MESSAGE_OUT = "message-out";
+    String MESSAGE_IN = "message-in";
+
+    @Output(MESSAGE_OUT)
+    MessageChannel messageOut();
+
+    @Input(MESSAGE_IN)
+    SubscribableChannel messageIn();
+}
+```
+
+声明`Binding`
+
+```java
+@EnableBinding(MessageTopic.class)
+@SpringBootApplication
+public class StreamDemoApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(StreamDemoApplication.class, args);
+    }
+
+}
+```
+
+生产者
+
+```java
+@RestController
+public class MessageSender {
+    @Autowired
+    private MessageTopic messageTopic;
+
+    @GetMapping("")
+    public String sendMessage() {
+        messageTopic.messageOut().send(MessageBuilder.withPayload("date is " + new Date()).build());
+        return "ok";
+    }
+}
+```
+
+消费者
+
+```java
+@Slf4j
+@Component
+public class MessageListener {
+    @StreamListener(value = MessageTopic.MESSAGE_IN)
+    public void receive(String payload) {
+        log.info("receive: " + payload);
+    }
+}
+```
+
+配置
+
+```properties
+spring.application.name=stream-demo
+server.port=8050
+
+eureka.client.serviceUrl.defaultZone=http://localhost:8761/eureka
+
+spring.rabbitmq.addresses=localhost
+spring.rabbitmq.port=5672
+spring.rabbitmq.username=admin
+spring.rabbitmq.password=admin
+
+spring.cloud.stream.bindings.message-out.destination=message-topic
+spring.cloud.stream.bindings.message-in.destination=message-topic
+spring.cloud.stream.bindings.message-in.group=message-group
+# 消费消息异常时，最大重试次数
+# spring.cloud.stream.bindings.message-in.consumer.max-attempts=1
+# 消费消息异常时，消息进死信队列
+# spring.cloud.stream.rabbit.bindings.message-in.consumer.auto-bind-dlq=true
+```
+
+启动程序后，访问http://localhost:8050/ 可以观察到日志，能正确的接收到消息
+
+```
+2021-03-18 11:24:02.207 |message-topic.message-group-1 |INFO  |c.r.s.c.e.s.MessageListener:16 - receive: date is Thu Mar 18 11:24:02 CST 2021
+2021-03-18 11:24:03.350 |message-topic.message-group-1 |INFO  |c.r.s.c.e.s.MessageListener:16 - receive: date is Thu Mar 18 11:24:03 CST 2021
+```
+
