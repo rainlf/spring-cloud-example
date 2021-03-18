@@ -698,3 +698,148 @@ spring.cloud.stream.bindings.message-in.group=message-group
 2021-03-18 11:24:03.350 |message-topic.message-group-1 |INFO  |c.r.s.c.e.s.MessageListener:16 - receive: date is Thu Mar 18 11:24:03 CST 2021
 ```
 
+### 配置中心（Spring Cloud Conig）
+
+`Spring Cloud Config`为分布式系统提供了`server端`和`client端`的配置外化方案。在`server端`默认使用`git`作为配置管理工具。
+
+#### Server端
+
+依赖
+
+```xml
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-config-server</artifactId>
+</dependency>
+```
+
+开启注解
+```java
+@EnableConfigServer
+@SpringBootApplication
+public class ConfigServerApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(ConfigServerApplication.class, args);
+    }
+
+}
+```
+
+配置
+
+```properties
+spring.application.name=config-server
+server.port=8060
+
+eureka.client.serviceUrl.defaultZone=http://localhost:8761/eureka
+
+# 配置git仓库地址
+spring.cloud.config.server.git.uri=file://${user.home}/config-repo
+# 配置仓库子目录
+# spring.cloud.config.server.git.search-paths=config-repo
+# 配置仓库的分支
+# spring.cloud.config.label=master
+# 访问git仓库的用户名
+# spring.cloud.config.server.git.username=
+# 访问git仓库的用户密码
+# spring.cloud.config.server.git.password=
+```
+
+在对应目录下，初始化`git`环境，新建`config-client-dev.properties`文件后提交，文件内容如下
+```properties
+test.value1=111
+test.value2=222
+```
+
+启动应用后，访问http://localhost:8060/config-client/dev 可以看到被管理的配置
+
+```json
+{
+    "name": "config-client",
+    "profiles": [
+        "dev"
+    ],
+    "label": null,
+    "version": "bad2b10c9b719277a5b4d7ceb74bb1c3a050396c",
+    "state": null,
+    "propertySources": [{
+            "name": "file:///D:\\Users\\yhee/config-repo/config-client-dev.properties",
+            "source": {
+                "test.value1": "333333",
+                "test.value2": "121212"
+            }
+        }
+    ]
+}
+```
+
+#### Client端
+
+依赖，在`client`端，如需使用配置刷新功能则需要`spring-boot-starter-actuator`提供的`/actuator/refresh`端点
+
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-actuator</artifactId>
+</dependency>
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-starter-config</artifactId>
+</dependency>
+```
+
+在项目内可像正常使用本地配置文件一样使用远程配置文件变量
+
+```java
+@Slf4j
+@RefreshScope
+@RestController
+public class TestController {
+    @Value("${test.value1}")
+    private Integer value1;
+
+    @Value("${test.value2}")
+    private String value2;
+
+    @GetMapping("")
+    public String test() {
+        log.info("value1: {}", value1);
+        log.info("value2: {}", value2);
+        return value1 + " " + value2;
+    }
+}
+```
+
+配置
+
+```properties
+spring.application.name=config-client
+server.port=8061
+
+eureka.client.serviceUrl.defaultZone=http://localhost:8761/eureka
+
+management.endpoints.web.exposure.include=refresh
+```
+
+`Spring Cloud Config`的配置需写入`bootstrap.properties`中
+
+```properties
+# 配置中心地址（服务发现）
+spring.cloud.config.discovery.enabled=true
+spring.cloud.config.discovery.service-id=config-server
+# 配置中心地址
+# spring.cloud.config.uri=http://localhost:8060
+# 配置文件后缀
+spring.cloud.config.profile=dev
+```
+
+启动应用后访问http://localhost:8061/ 可以观察到日志获取到了远程配置
+
+```
+2021-03-18 15:20:40.448 |http-nio-8061-exec-2 |INFO  |c.r.s.c.e.c.TestController:26 - value1: 111
+2021-03-18 15:20:40.449 |http-nio-8061-exec-2 |INFO  |c.r.s.c.e.c.TestController:27 - value2: 222
+```
+
+再配置中心仓库中提交了新的修改后，调用`curl -XPOST http://localhost:8061/actuator/refresh`刷新配置，再次访问可看到更新后的配置已被正常获取到。
+
