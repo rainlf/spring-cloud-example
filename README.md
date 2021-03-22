@@ -10,13 +10,13 @@
 
 下文对各个模块的使用过程做详细说明。
 
-## 环境
+## 开发环境
 
 - `java 8`
 - `spring boot 2.3.7.RELEASE`
 - `spring cloud Hoxton.SR9`
 
-## 依赖
+## 依赖列表
 
 - `spring-cloud-starter-netflix-eureka-server`
 - `spring-cloud-starter-netflix-eureka-client`
@@ -35,11 +35,11 @@
 
 ### 服务发现与注册（Eureka）
 
-·pringCloud使用Eureka作为注册中心来提供服务注册与服务发现功能，Eureka的设计实现了CAP原则中的AP部分，保证了可用性。集群部署的Eureka服务架构如下图所示。
+`SpringCloud`使用`Eureka`作为注册中心来提供服务注册与服务发现功能，`Eureka`的设计实现了`CAP`原则中的`AP`部分，保证了可用性。集群部署的`Eureka`服务架构如下图所示。
 
 ![1615869052054](README/1615869052054.png)
 
-下面介绍Server端与Client端的具体实现。
+下面介绍`Server端`与`Client端`的具体实现。
 
 #### Server端
 
@@ -55,15 +55,12 @@
 添加注解
 
 ```java
-
 @EnableEurekaServer
 @SpringBootApplication
 public class EurekaServerApplication {
-
     public static void main(String[] args) {
         SpringApplication.run(EurekaServerApplication.class, args);
     }
-
 }
 ```
 
@@ -128,9 +125,9 @@ eureka.client.serviceUrl.defaultZone=http://localhost:8761/eureka
 
 使用时`Provider`和`Consumer`服务均需向注册中心中进行注册，`Consumer`的`Feign client`通过`Provider`的服务名向注册中心检索获并取其真实地址，然后完成通信，下面详细介绍二者的使用实现。
 
-#### Provider方
+#### Provider
 
-`Provider`方为普通的`web`服务客户端，通过`@RestController`注解提供`REST`端点服务。如
+`Provider`为普通的`web`服务客户端，通过`@RestController`注解提供`REST`端点服务。如
 
 ```java
 @RestController
@@ -154,7 +151,7 @@ public class OpenFeignProviderController {
 }
 ```
 
-#### Consumer方
+#### Consumer
 
 添加依赖
 
@@ -165,7 +162,7 @@ public class OpenFeignProviderController {
 </dependency>
 ```
 
-声明`web`服务客户端，并可以在其中指定对应的断路器实现
+声明`web`服务客户端，并可以在其中指定对应的`fallback`实现
 
 ```java
 @FeignClient(value = "${openfeign.provider.name}", fallback = OpenFeignProviderFallback.class)
@@ -180,7 +177,7 @@ public interface IOpenFeignProvider {
     String sayHiWithSleep();
 }
 ```
-断路器具体实现
+`fallback`具体实现
 
 ```java
 @Component
@@ -599,7 +596,7 @@ spring.zipkin.base-url=http://localhost:9411
 
 #### Partition
 
-通过`consumer group`，可以保障每个消息只会被组内的某个示例消费一次，但是不能控制消息会被哪一个示例来消费。这种情况下，多条消息到达后，可能会由不同的`consumer`示例来消费。
+通过`consumer group`，可以保障每个消息只会被组内的某个实例消费一次，但是不能控制消息会被哪一个实例来消费。这种情况下，多条消息到达后，可能会由不同的`consumer`实例来消费。
 
 在一切特定场景中，需要具有某些相同特征的消息会被同一个消费者来消费，因此，`MQ`中间件引入了消息分区的概念，使消息可以根据特征写入到不同的`partition`中，不同的消费者实例指定消费不同`partition`的消息，确保了相同特征消息会被同一个消费者来消费。
 
